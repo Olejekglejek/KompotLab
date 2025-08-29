@@ -9,6 +9,9 @@
 
     - name: Create Talos Nodes
       import_tasks: create-nodes.yml
+
+    - name: Config Talos Nodes
+      import_tasks: config-nodes.yml
   when: not delete | bool
 
 - name: Cleanup
