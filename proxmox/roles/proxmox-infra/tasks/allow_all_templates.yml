@@ -1,0 +1,13 @@
+
+
+- name: Allow all templates message
+  debug:
+    msg: "Now we will enable all templates for local storage."
+
+- name: Enable all content types for local storage
+  lineinfile:
+    path: /etc/pve/storage.cfg
+    regexp: '^\s*content\s+'
+    line: '    content images,iso,vztmpl,backup,rootdir,snippets,import'
+    backrefs: yes
+  become: true

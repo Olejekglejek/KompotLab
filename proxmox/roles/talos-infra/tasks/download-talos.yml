@@ -1,0 +1,32 @@
+- name: Download Talos ISO
+  block:
+    - name: Verify ISO exists in Proxmox storage
+      stat:
+        path: /var/lib/vz/template/iso/talos.iso
+      register: iso_check
+
+    - name: Verify ISO is downloaded in tmp directory
+      stat:
+        path: /tmp/talos.iso
+      register: iso_downloaded
+      when: not iso_check.stat.exists
+
+    - name: Download ISO image
+      get_url:
+        url: "https://factory.talos.dev/image/ce4c980550dd2ab1b17bbf2b08801c7eb59418eafe8f279833297925d67c7515/v1.10.3/nocloud-amd64.iso"
+        dest: "/tmp/talos.iso"
+      register: iso_download_result
+      when: iso_downloaded is not skipped
+
+    - name: Copy ISO from tmp directory to Proxmox storage
+      copy:
+        src: /tmp/talos.iso
+        dest: /var/lib/vz/template/iso/
+        remote_src: yes
+      when: iso_download_result is not skipped
+
+    - name: Remove ISO from tmp directory
+      file:
+        path: /tmp/talos.iso
+        state: absent
+      when: iso_download_result is not skipped

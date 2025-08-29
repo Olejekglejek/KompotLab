@@ -1,0 +1,49 @@
+- name: Check if talos-template already exists
+  community.general.proxmox_kvm:
+    api_user: "{{ ansible_ssh_user }}@pam"
+    api_password: "{{ ansible_ssh_pass }}"
+    api_host: "{{ ansible_host }}"
+    node: "{{ proxmox_node }}"
+    vmid: 8200
+    state: current
+  delegate_to: localhost
+  register: template_check
+  failed_when: false
+
+- name: Display template status
+  debug:
+    msg: "Template talos-template (VMID 8200) {{ 'exists' if template_check.vmid is defined else 'does not exist' }}"
+
+- name: Create VM for template
+  community.general.proxmox_kvm:
+    api_user: "{{ ansible_ssh_user }}@pam"
+    api_password: "{{ ansible_ssh_pass }}"
+    api_host: "{{ ansible_host }}"
+    node: "{{ proxmox_node }}"
+    vmid: 8200
+    name: talos-template
+    memory: 7168
+    cores: 2
+    agent: 1
+    cpu: host
+    scsihw: virtio-scsi-pci
+    net:
+      net0: virtio,bridge=vmbr0
+    ide:
+      ide0: "local:iso/talos.iso,media=cdrom"
+      # ide2: "local:cloudinit"
+    state: present
+    tags: template
+  delegate_to: localhost
+  when: template_check.vmid is not defined
+
+- name: Convert VM to template
+  community.general.proxmox_kvm:
+    api_user: "{{ ansible_ssh_user }}@pam"
+    api_password: "{{ ansible_ssh_pass }}"
+    api_host: "{{ ansible_host }}"
+    node: "{{ proxmox_node }}"
+    vmid: 8200
+    state: template
+  delegate_to: localhost
+  when: template_check.vmid is not defined

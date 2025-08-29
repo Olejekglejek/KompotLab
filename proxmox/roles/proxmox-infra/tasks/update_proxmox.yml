@@ -1,0 +1,88 @@
+---
+
+- name: Display current .sources files content
+  shell: |
+    echo "=== Current repository configuration ==="
+    for file in /etc/apt/sources.list.d/*.sources; do
+      if [ -f "$file" ]; then
+        echo "File: $file"
+        cat "$file"
+        echo "---"
+      fi
+    done
+  register: current_sources
+  ignore_errors: true
+
+- name: Show current repository configuration
+  debug:
+    msg: "{{ current_sources.stdout_lines }}"
+
+- name: Disable enterprise repositories by renaming .sources files
+  shell: |
+    cd /etc/apt/sources.list.d/
+    # Rename enterprise sources files to .disabled
+    if [ -f "ceph.sources" ]; then
+      mv ceph.sources ceph.sources.disabled
+      echo "Disabled ceph.sources"
+    fi
+    if [ -f "pve-enterprise.sources" ]; then
+      mv pve-enterprise.sources pve-enterprise.sources.disabled
+      echo "Disabled pve-enterprise.sources"
+    fi
+  register: disable_result
+  ignore_errors: true
+
+- name: Show disable results
+  debug:
+    msg: "{{ disable_result.stdout_lines }}"
+
+- name: Download and install Proxmox GPG key for Trixie
+  shell: |
+    # Ensure curl is available
+    which curl || apt-get update && apt-get install -y curl
+    # Download the Proxmox GPG key for Trixie
+    curl -fsSL "http://download.proxmox.com/debian/proxmox-release-trixie.gpg" -o /tmp/proxmox-release-pubkey.gpg
+    # Install it to the keyrings directory
+    mkdir -p /usr/share/keyrings
+    cp /tmp/proxmox-release-pubkey.gpg /usr/share/keyrings/proxmox-release-trixie.gpg
+    # Also add the key to APT keyring for compatibility
+    gpg --dearmor < /tmp/proxmox-release-pubkey.gpg > /usr/share/keyrings/proxmox-release-trixie-dearmored.gpg || true
+    rm -f /tmp/proxmox-release-pubkey.gpg
+  ignore_errors: true
+
+- name: Create pve-no-subscription repository file with proper Trixie key reference
+  copy:
+    dest: /etc/apt/sources.list.d/pve-no-subscription.sources
+    content: |
+      Types: deb
+      URIs: http://download.proxmox.com/debian/pve
+      Suites: trixie
+      Components: pve-no-subscription
+      Signed-By: /usr/share/keyrings/proxmox-release-trixie.gpg
+    mode: '0644'
+
+- name: Ensure /etc/apt/sources.list exists and is clean
+  copy:
+    dest: /etc/apt/sources.list
+    content: |
+      # Main sources.list file - repositories are managed via .sources files
+    mode: '0644'
+
+- name: Remove all cached apt lists
+  shell: rm -rf /var/lib/apt/lists/*
+  ignore_errors: true
+
+- name: Update apt cache with clean configuration
+  apt:
+    update_cache: true
+    cache_valid_time: 0
+  retries: 3
+  delay: 5
+  register: apt_update_result
+  until: apt_update_result is succeeded
+
+- name: Upgrade all packages
+  apt:
+    upgrade: dist
+    autoremove: true
+    autoclean: true

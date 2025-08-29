@@ -1,0 +1,302 @@
+---
+- name: Message
+  debug:
+    msg: |
+      Now we will install FileBrowser on Talos Linux.
+      This will give you a web interface to manage your files including:
+      - Jellyfin media files
+      - AdGuard configuration files
+      - Other application data
+      - Full access to your USB storage at {{ filebrowser_storage_path }}
+
+- name: Create FileBrowser Namespace with Pod Security Settings
+  kubernetes.core.k8s:
+    definition:
+      apiVersion: v1
+      kind: Namespace
+      metadata:
+        name: filebrowser
+        labels:
+          app: filebrowser
+          pod-security.kubernetes.io/enforce: "{{ filebrowser_pod_security_enforce }}"
+          pod-security.kubernetes.io/audit: "{{ filebrowser_pod_security_audit }}"
+          pod-security.kubernetes.io/warn: "{{ filebrowser_pod_security_warn }}"
+    state: present
+
+- name: Create FileBrowser ConfigMap
+  kubernetes.core.k8s:
+    definition:
+      apiVersion: v1
+      kind: ConfigMap
+      metadata:
+        name: filebrowser-config
+        namespace: filebrowser
+      data:
+        settings.json: |
+          {
+            "port": 8080,
+            "baseURL": "",
+            "address": "{{ filebrowser_address }}",
+            "log": "stdout",
+            "database": "{{ filebrowser_database }}",
+            "root": "{{ filebrowser_root }}",
+            "signup": false,
+            "createUserDir": false,
+            "defaults": {
+              "scope": "{{ filebrowser_root }}",
+              "locale": "en",
+              "viewMode": "list",
+              "perm": {
+                "admin": false,
+                "execute": true,
+                "create": true,
+                "rename": true,
+                "modify": true,
+                "delete": true,
+                "share": true,
+                "download": true
+              },
+              "commands": [],
+              "sorting": {
+                "by": "name",
+                "asc": false
+              },
+              "rules": []
+            },
+            "commands": {
+              "before_upload": [],
+              "after_upload": []
+            }
+          }
+    state: present
+
+- name: Create FileBrowser Deployment
+  kubernetes.core.k8s:
+    definition:
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: filebrowser
+        namespace: filebrowser
+        labels:
+          app: filebrowser
+      spec:
+        replicas: 1
+        selector:
+          matchLabels:
+            app: filebrowser
+        template:
+          metadata:
+            labels:
+              app: filebrowser
+          spec:
+            initContainers:
+            - name: setup-directories
+              image: alpine:latest
+              command: ['sh', '-c']
+              args:
+              - |
+                echo "Setting up FileBrowser directories..."
+                mkdir -p /var/lib/filebrowser/config
+                mkdir -p /var/lib/filebrowser/database
+                mkdir -p /var/lib/filebrowser/data
+                chown -R 1000:1000 /var/lib/filebrowser/
+                chmod -R 755 /var/lib/filebrowser/
+                echo "Directories created successfully:"
+                ls -la /var/lib/filebrowser/
+              volumeMounts:
+              - name: usb-storage
+                mountPath: /var/lib
+              securityContext:
+                runAsUser: 0
+            - name: setup-config
+              image: alpine:latest
+              command: ['sh', '-c']
+              args:
+              - |
+                echo "Copying FileBrowser configuration..."
+                cp /tmp/config/settings.json /var/lib/filebrowser/config/settings.json
+                chmod 644 /var/lib/filebrowser/config/settings.json
+                echo "Configuration file created:"
+                cat /var/lib/filebrowser/config/settings.json
+              volumeMounts:
+              - name: usb-storage
+                mountPath: /var/lib
+              - name: config-volume
+                mountPath: /tmp/config
+              securityContext:
+                runAsUser: 0
+            - name: initialize-database
+              image: "{{ filebrowser_image }}"
+              command: ['sh', '-c']
+              args:
+              - |
+                echo "Initializing FileBrowser database..."
+                # Create database if it doesn't exist
+                if [ ! -f "{{ filebrowser_database }}" ]; then
+                  echo "Creating new database..."
+                  filebrowser -d "{{ filebrowser_database }}" config init
+                  echo "Setting up admin user..."
+                  filebrowser -d "{{ filebrowser_database }}" users add "{{ filebrowser_admin_user }}" "{{ filebrowser_admin_password }}" --perm.admin
+                  echo "Admin user created with username: {{ filebrowser_admin_user }}"
+                else
+                  echo "Database already exists, skipping initialization"
+                fi
+
+                # Import settings
+                echo "Importing configuration settings..."
+                filebrowser -d "{{ filebrowser_database }}" config import /config/settings.json || echo "Config import completed"
+
+                echo "Database initialization complete"
+                ls -la "{{ filebrowser_database }}"
+              volumeMounts:
+              - name: usb-storage
+                mountPath: /srv
+                subPath: filebrowser/data
+              - name: usb-storage
+                mountPath: /database
+                subPath: filebrowser/database
+              - name: usb-storage
+                mountPath: /config
+                subPath: filebrowser/config
+              securityContext:
+                runAsUser: 1000
+                runAsGroup: 1000
+            containers:
+            - name: filebrowser
+              image: "{{ filebrowser_image }}"
+              securityContext:
+                runAsUser: 1000
+                runAsGroup: 1000
+                allowPrivilegeEscalation: false
+              ports:
+              - containerPort: 8080
+                name: http
+              args:
+              - "-d"
+              - "{{ filebrowser_database }}"
+              - "-r"
+              - "{{ filebrowser_root }}"
+              - "-p"
+              - "8080"
+              - "-a"
+              - "{{ filebrowser_address }}"
+              volumeMounts:
+              - name: usb-storage
+                mountPath: /srv
+                subPath: filebrowser/data
+              - name: usb-storage
+                mountPath: /database
+                subPath: filebrowser/database
+              - name: usb-storage
+                mountPath: /config
+                subPath: filebrowser/config
+              resources:
+                limits:
+                  cpu: "500m"
+                  memory: "512Mi"
+                requests:
+                  cpu: "100m"
+                  memory: "128Mi"
+              livenessProbe:
+                httpGet:
+                  path: /
+                  port: http
+                initialDelaySeconds: 60
+                periodSeconds: 10
+                timeoutSeconds: 5
+                failureThreshold: 3
+              readinessProbe:
+                httpGet:
+                  path: /
+                  port: http
+                initialDelaySeconds: 30
+                periodSeconds: 5
+                timeoutSeconds: 3
+                failureThreshold: 3
+              env:
+              - name: FB_DATABASE
+                value: "{{ filebrowser_database }}"
+              - name: FB_ROOT
+                value: "{{ filebrowser_root }}"
+              - name: FB_PORT
+                value: "8080"
+              - name: FB_ADDRESS
+                value: "{{ filebrowser_address }}"
+            volumes:
+            - name: usb-storage
+              hostPath:
+                path: "{{ usb_storage_path }}"
+                type: Directory
+            - name: config-volume
+              configMap:
+                name: filebrowser-config
+    state: present
+
+- name: Create FileBrowser Service
+  kubernetes.core.k8s:
+    definition:
+      apiVersion: v1
+      kind: Service
+      metadata:
+        name: filebrowser
+        namespace: filebrowser
+        labels:
+          app: filebrowser
+      spec:
+        type: "{{ filebrowser_service_type }}"
+        ports:
+        - port: 8080
+          targetPort: 8080
+          nodePort: 31080
+          protocol: TCP
+          name: http
+        selector:
+          app: filebrowser
+    state: present
+
+- name: Wait for FileBrowser deployment to be ready
+  kubernetes.core.k8s_info:
+    api_version: apps/v1
+    kind: Deployment
+    name: filebrowser
+    namespace: filebrowser
+    wait: true
+    wait_condition:
+      type: Available
+      status: "True"
+    wait_timeout: 300
+
+- name: Display FileBrowser access information
+  debug:
+    msg: |
+      ==========================================
+      FileBrowser has been deployed successfully!
+      ==========================================
+
+      Access URL: http://192.168.1.245:{{ filebrowser_node_port }}
+
+      Default credentials:
+      Username: {{ filebrowser_admin_user }}
+      Password: {{ filebrowser_admin_password }}
+
+      ** IMPORTANT: Change the password immediately after first login! **
+
+      Storage Information:
+      - USB Storage Path: {{ usb_storage_path }}
+      - FileBrowser will have access to your entire USB storage
+      - Configuration stored in: {{ usb_storage_path }}/filebrowser/config/
+      - Database stored in: {{ usb_storage_path }}/filebrowser/database/
+      - Data accessible at: {{ usb_storage_path }}/filebrowser/data/
+
+      Features:
+      - Port {{ filebrowser_port }} (hurlenko/filebrowser image)
+      - Pod Security: {{ filebrowser_pod_security_enforce }} level
+      - Automated credential setup (no manual kubectl exec needed)
+      - Full USB storage access ({{ usb_storage_path }})
+
+      To replace USB stick in future:
+      1. Update 'usb_storage_path' in defaults/main.yml
+      2. Re-run this playbook
+
+      ==========================================

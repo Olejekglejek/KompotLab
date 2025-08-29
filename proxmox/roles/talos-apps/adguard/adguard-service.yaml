@@ -1,0 +1,30 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: adguard
+  namespace: adguard
+  annotations:
+    # Uncomment and adjust if using MetalLB and need a specific address pool
+    # metallb.universe.tf/address-pool: default
+spec:
+  type: LoadBalancer
+  selector:
+    app: adguard
+  ports:
+    - name: http-setup
+      protocol: TCP
+      port: 3000
+      targetPort: 3000
+    - name: http-ui
+      protocol: TCP
+      port: 80
+      targetPort: 80
+    - name: dns-udp
+      protocol: UDP
+      port: 53
+      targetPort: 53
+    - name: dns-tcp
+      protocol: TCP
+      port: 53
+      targetPort: 53
+  externalTrafficPolicy: Cluster

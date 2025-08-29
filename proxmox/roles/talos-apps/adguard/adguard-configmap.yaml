@@ -1,0 +1,9 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: adguard-config
+  namespace: adguard
+  labels:
+    app: adguard
+# You can add custom AdGuardHome config here if needed
+# For first run, AdGuardHome will generate its own config

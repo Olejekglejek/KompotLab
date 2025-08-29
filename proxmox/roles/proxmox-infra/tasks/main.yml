@@ -1,0 +1,10 @@
+
+# - include_tasks: utilize_full_disk.yml
+
+# - include_tasks: allow_all_templates.yml
+
+# - include_tasks: update_proxmox.yml
+
+# - include_tasks: mount_usbs.yml
+
+# - include_tasks: fix_locale.yml

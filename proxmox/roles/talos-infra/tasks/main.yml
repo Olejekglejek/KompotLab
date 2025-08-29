@@ -1,0 +1,16 @@
+---
+- name: Create stuff
+  block:
+    - name: Download Talos ISO
+      import_tasks: download-talos.yml
+
+    - name: Create Proxmox VM template
+      import_tasks: create-template.yml
+
+    - name: Create Talos Nodes
+      import_tasks: create-nodes.yml
+  when: not delete | bool
+
+- name: Cleanup
+  import_tasks: clean-up.yml
+  when: delete | bool

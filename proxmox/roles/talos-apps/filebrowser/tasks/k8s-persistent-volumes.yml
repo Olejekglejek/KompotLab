@@ -1,0 +1,105 @@
+---
+- name: Create FileBrowser Data PersistentVolume
+  kubernetes.core.k8s:
+    definition:
+      apiVersion: v1
+      kind: PersistentVolume
+      metadata:
+        name: filebrowser-data-pv
+      spec:
+        capacity:
+          storage: "20Gi"
+        accessModes:
+          - ReadWriteOnce
+        persistentVolumeReclaimPolicy: Retain
+        storageClassName: ""
+        hostPath:
+          path: "/var/lib/filebrowser/data"
+    state: present
+
+- name: Create FileBrowser Database PersistentVolume
+  kubernetes.core.k8s:
+    definition:
+      apiVersion: v1
+      kind: PersistentVolume
+      metadata:
+        name: filebrowser-database-pv
+      spec:
+        capacity:
+          storage: "1Gi"
+        accessModes:
+          - ReadWriteOnce
+        persistentVolumeReclaimPolicy: Retain
+        storageClassName: ""
+        hostPath:
+          path: "/var/lib/filebrowser/database"
+    state: present
+
+- name: Create FileBrowser Config PersistentVolume
+  kubernetes.core.k8s:
+    definition:
+      apiVersion: v1
+      kind: PersistentVolume
+      metadata:
+        name: filebrowser-config-pv
+      spec:
+        capacity:
+          storage: "512Mi"
+        accessModes:
+          - ReadWriteOnce
+        persistentVolumeReclaimPolicy: Retain
+        storageClassName: ""
+        hostPath:
+          path: "/var/lib/filebrowser/config"
+    state: present
+
+- name: Create FileBrowser Data PersistentVolumeClaim
+  kubernetes.core.k8s:
+    definition:
+      apiVersion: v1
+      kind: PersistentVolumeClaim
+      metadata:
+        name: filebrowser-data-pvc
+        namespace: filebrowser
+      spec:
+        accessModes:
+          - ReadWriteOnce
+        storageClassName: ""
+        resources:
+          requests:
+            storage: "20Gi"
+    state: present
+
+- name: Create FileBrowser Database PersistentVolumeClaim
+  kubernetes.core.k8s:
+    definition:
+      apiVersion: v1
+      kind: PersistentVolumeClaim
+      metadata:
+        name: filebrowser-database-pvc
+        namespace: filebrowser
+      spec:
+        accessModes:
+          - ReadWriteOnce
+        storageClassName: ""
+        resources:
+          requests:
+            storage: "1Gi"
+    state: present
+
+- name: Create FileBrowser Config PersistentVolumeClaim
+  kubernetes.core.k8s:
+    definition:
+      apiVersion: v1
+      kind: PersistentVolumeClaim
+      metadata:
+        name: filebrowser-config-pvc
+        namespace: filebrowser
+      spec:
+        accessModes:
+          - ReadWriteOnce
+        storageClassName: ""
+        resources:
+          requests:
+            storage: "512Mi"
+    state: present
