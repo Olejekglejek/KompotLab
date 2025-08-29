@@ -69,7 +69,15 @@ machine:
         #         - '!10.0.0.3/32'
         #         - fdc7::/16
     # Provides machine specific network configuration options.
-    network: {}
+    network:
+        interfaces:
+            - interface: eth0
+              addresses:
+                  - {{ controlplane_ip | default('192.168.1.200/24') }}
+              routes:
+                  - network: 0.0.0.0/0
+                    gateway: {{ controlplane_gateway | default(worker_gateway) }}
+              dhcp: false
     # # `interfaces` is used to define the network interface configuration.
     # interfaces:
     #     - interface: enp0s1 # The interface name.
