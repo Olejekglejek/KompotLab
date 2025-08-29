@@ -1,0 +1,15 @@
+---
+- hosts: localhost
+  connection: local
+  gather_facts: no
+
+  tasks:
+    - name: Message
+      debug:
+        msg: |
+          Hello World!
+          This is playbook will install AdGuard on Talos Linux.
+
+    - name: Include Talos AdGuard Role
+      include_role:
+        name: talos-apps/adguard

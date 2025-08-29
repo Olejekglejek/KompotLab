@@ -1,0 +1,77 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: filebrowser
+  namespace: filebrowser
+  labels:
+    app: filebrowser
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: filebrowser
+  template:
+    metadata:
+      labels:
+        app: filebrowser
+    spec:
+      initContainers:
+      - name: setup-directories
+        image: alpine:latest
+        command: ['sh', '-c']
+        args:
+        - |
+          mkdir -p /var/lib/filebrowser/config
+          mkdir -p /var/lib/filebrowser/database
+          mkdir -p /var/lib/filebrowser/data
+          chown -R 1000:1000 /var/lib/filebrowser/
+          chmod -R 777 /var/lib/filebrowser/
+          echo "Directories created and permissions set"
+        volumeMounts:
+        - name: usb-storage
+          mountPath: /var/lib
+        securityContext:
+          runAsUser: 0
+      containers:
+      - name: filebrowser
+        image: hurlenko/filebrowser:latest
+        securityContext:
+          runAsUser: 0
+        ports:
+        - containerPort: 8080
+          name: http
+        volumeMounts:
+        - name: usb-storage
+          mountPath: /srv
+          subPath: filebrowser/data
+        - name: usb-storage
+          mountPath: /database
+          subPath: filebrowser/database
+        - name: usb-storage
+          mountPath: /config
+          subPath: filebrowser/config
+        resources:
+          limits:
+            cpu: "500m"
+            memory: "512Mi"
+          requests:
+            cpu: "100m"
+            memory: "128Mi"
+        livenessProbe:
+          httpGet:
+            path: /
+            port: 8080
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /
+            port: 8080
+          initialDelaySeconds: 10
+          periodSeconds: 5
+      volumes:
+      - name: usb-storage
+        hostPath:
+          path: /var/lib
+          type: Directory

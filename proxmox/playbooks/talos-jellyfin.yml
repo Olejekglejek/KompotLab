@@ -1,0 +1,15 @@
+---
+- hosts: localhost
+  connection: local # Uncomment if running locally where this playbook is executed
+  gather_facts: no
+
+  tasks:
+    - name: Message
+      debug:
+        msg: |
+          Hello World!
+          This is playbook will install Jellyfin on Talos Linux.
+
+    - name: Include Talos Jellyfin Role
+      include_role:
+        name: ../roles/talos-jellyfin

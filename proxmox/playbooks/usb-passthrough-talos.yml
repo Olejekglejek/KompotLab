@@ -1,0 +1,188 @@
+---
+- name: USB Passthrough Setup for Talos VMs
+  hosts: proxmox-kube
+  gather_facts: false
+  vars:
+    proxmox_host: "{{ ansible_host }}"
+    proxmox_user: "root@pam"
+    proxmox_password: "{{ ansible_ssh_pass }}"
+    # Define your Talos VM IDs here
+    talos_vms:
+      - vmid: 8201
+        name: "talos-master"
+      - vmid: 8202
+        name: "talos-worker"
+    # USB device identification (will be detected automatically)
+    usb_device_pattern: "64G"  # Look for 64GB USB device
+
+  tasks:
+    - name: Install required Python modules
+      pip:
+        name:
+          - proxmoxer
+          - requests
+      delegate_to: localhost
+
+    - name: Get authentication ticket from Proxmox
+      uri:
+        url: "https://{{ proxmox_host }}:8006/api2/json/access/ticket"
+        method: POST
+        validate_certs: false
+        body_format: form-urlencoded
+        body:
+          username: "{{ proxmox_user }}"
+          password: "{{ proxmox_password }}"
+      register: auth_result
+      delegate_to: localhost
+
+    - name: Set authentication headers
+      set_fact:
+        auth_headers:
+          Cookie: "PVEAuthCookie={{ auth_result.json.data.ticket }}"
+          CSRFPreventionToken: "{{ auth_result.json.data.CSRFPreventionToken }}"
+
+    - name: Get Proxmox node information
+      uri:
+        url: "https://{{ proxmox_host }}:8006/api2/json/nodes"
+        method: GET
+        validate_certs: false
+        headers: "{{ auth_headers }}"
+      register: proxmox_nodes
+      delegate_to: localhost
+      run_once: true
+
+    - name: Find USB devices on Proxmox host
+      uri:
+        url: "https://{{ proxmox_host }}:8006/api2/json/nodes/{{ proxmox_nodes.json.data[0].node }}/hardware/usb"
+        method: GET
+        validate_certs: false
+        headers: "{{ auth_headers }}"
+      register: usb_devices
+      delegate_to: localhost
+      run_once: true
+
+    - name: Display available USB devices
+      debug:
+        msg: |
+          Available USB devices on Proxmox:
+          {% for device in usb_devices.json.data %}
+          - {{ device.devpath }}: {{ device.manufacturer | default('Unknown') }} {{ device.product | default('') }} ({{ device.busnum }}-{{ device.devnum }})
+          {% endfor %}
+      delegate_to: localhost
+      run_once: true
+
+    - name: Identify target USB device
+      set_fact:
+        target_usb_device: "{{ item }}"
+      loop: "{{ usb_devices.json.data }}"
+      when:
+        - item.product is defined
+        - usb_device_pattern in (item.product | string)
+      delegate_to: localhost
+      run_once: true
+
+    - name: Fail if USB device not found
+      fail:
+        msg: |
+          USB device with pattern '{{ usb_device_pattern }}' not found.
+          Available devices: {{ usb_devices.json.data | map(attribute='product') | list }}
+      when: target_usb_device is not defined
+      delegate_to: localhost
+      run_once: true
+
+    - name: Display target USB device
+      debug:
+        msg: |
+          Target USB device found:
+          - Device: {{ target_usb_device.product }}
+          - Manufacturer: {{ target_usb_device.manufacturer | default('Unknown') }}
+          - Device Path: {{ target_usb_device.devpath }}
+          - Bus-Device: {{ target_usb_device.busnum }}-{{ target_usb_device.devnum }}
+      delegate_to: localhost
+      run_once: true
+
+    - name: Get current VM configurations
+      uri:
+        url: "https://{{ proxmox_host }}:8006/api2/json/nodes/{{ proxmox_nodes.json.data[0].node }}/qemu/{{ item.vmid }}/config"
+        method: GET
+        user: "{{ proxmox_user }}"
+        password: "{{ proxmox_password }}"
+        validate_certs: false
+      register: vm_configs
+      loop: "{{ talos_vms }}"
+      delegate_to: localhost
+
+    - name: Stop Talos VMs before configuration
+      uri:
+        url: "https://{{ proxmox_host }}:8006/api2/json/nodes/{{ proxmox_nodes.json.data[0].node }}/qemu/{{ item.vmid }}/status/stop"
+        method: POST
+        user: "{{ proxmox_user }}"
+        password: "{{ proxmox_password }}"
+        validate_certs: false
+        body_format: form-urlencoded
+        body: {}
+      loop: "{{ talos_vms }}"
+      register: stop_results
+      delegate_to: localhost
+
+    - name: Wait for VMs to stop
+      uri:
+        url: "https://{{ proxmox_host }}:8006/api2/json/nodes/{{ proxmox_nodes.json.data[0].node }}/qemu/{{ item.vmid }}/status/current"
+        method: GET
+        user: "{{ proxmox_user }}"
+        password: "{{ proxmox_password }}"
+        validate_certs: false
+      register: vm_status
+      until: vm_status.json.data.status == "stopped"
+      retries: 30
+      delay: 10
+      loop: "{{ talos_vms }}"
+      delegate_to: localhost
+
+    - name: Add USB passthrough to Talos VMs
+      uri:
+        url: "https://{{ proxmox_host }}:8006/api2/json/nodes/{{ proxmox_nodes.json.data[0].node }}/qemu/{{ item.vmid }}/config"
+        method: PUT
+        user: "{{ proxmox_user }}"
+        password: "{{ proxmox_password }}"
+        validate_certs: false
+        body_format: form-urlencoded
+        body:
+          usb0: "host={{ target_usb_device.busnum }}-{{ target_usb_device.devnum }}"
+      loop: "{{ talos_vms }}"
+      delegate_to: localhost
+
+    - name: Start Talos VMs
+      uri:
+        url: "https://{{ proxmox_host }}:8006/api2/json/nodes/{{ proxmox_nodes.json.data[0].node }}/qemu/{{ item.vmid }}/status/start"
+        method: POST
+        user: "{{ proxmox_user }}"
+        password: "{{ proxmox_password }}"
+        validate_certs: false
+        body_format: form-urlencoded
+        body: {}
+      loop: "{{ talos_vms }}"
+      delegate_to: localhost
+
+    - name: Wait for VMs to start and be accessible
+      wait_for:
+        timeout: 300
+      delegate_to: localhost
+
+    - name: Display completion message
+      debug:
+        msg: |
+          ✅ USB Passthrough Configuration Complete!
+
+          USB Device Details:
+          - Device: {{ target_usb_device.product }}
+          - Passed through to VMs: {{ talos_vms | map(attribute='name') | list | join(', ') }}
+
+          Next Steps:
+          1. Wait for Talos VMs to fully boot (check with: kubectl get nodes)
+          2. Run the Talos USB configuration playbook to mount the device
+          3. Update your Kubernetes applications to use the USB storage
+
+          The USB device should now appear as /dev/sdb in your Talos VMs.
+      delegate_to: localhost
+      run_once: true

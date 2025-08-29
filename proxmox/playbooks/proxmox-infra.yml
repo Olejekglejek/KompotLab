@@ -1,0 +1,19 @@
+
+- hosts: proxmox
+  gather_facts: false
+  vars:
+    secrets: "{{ lookup('file', '../../.env/secrets.yml') | from_yaml }}"
+    ansible_host: "{{ secrets.ansible_host }}"
+    ansible_ssh_user: "{{ secrets.ansible_ssh_user }}"
+    ansible_ssh_pass: "{{ secrets.ansible_ssh_pass }}"
+    ansible_become_pass: "{{ secrets.ansible_become_pass }}"
+
+  tasks:
+    - name: Message
+      debug:
+        msg: |
+          This is playbook for configuring Proxmox.
+
+    - name: Include Proxmox Infra Role
+      include_role:
+        name: proxmox-infra

@@ -1,0 +1,89 @@
+- name: Check if master VM already exists
+  community.general.proxmox_kvm:
+    api_user: "{{ ansible_ssh_user }}@pam"
+    api_password: "{{ ansible_ssh_pass }}"
+    api_host: "{{ ansible_host }}"
+    node: "{{ proxmox_node }}"
+    vmid: 101
+    state: current
+  delegate_to: localhost
+  register: master_check
+  failed_when: false
+
+- name: Display master VM status
+  debug:
+    msg: "Master VM (VMID 101) {{ 'exists' if master_check.vmid is defined else 'does not exist' }}"
+
+- name: Create VM from template
+  community.general.proxmox_kvm:
+    api_user: "{{ ansible_ssh_user }}@pam"
+    api_password: "{{ ansible_ssh_pass }}"
+    api_host: "{{ ansible_host }}"
+    node: "{{ proxmox_node }}"
+    vmid: 101
+    name: master
+    agent: 1
+    memory: 7168
+    cores: 2
+    cpu: host
+    ipconfig:
+      ipconfig0: "ip=192.168.1.200/24,gw=192.168.1.1"
+    scsihw: virtio-scsi-pci
+    scsi:
+      scsi0: "local:34,format=qcow2"
+    net:
+      net0: virtio,bridge=vmbr0
+    ide:
+      ide0: "local:iso/talos.iso,media=cdrom"
+      # ide2: "local:cloudinit"
+    state: present
+    tags:
+      - talos
+      - control-plane
+  delegate_to: localhost
+  when: master_check.vmid is not defined
+
+- name: Check if worker VM already exists
+  community.general.proxmox_kvm:
+    api_user: "{{ ansible_ssh_user }}@pam"
+    api_password: "{{ ansible_ssh_pass }}"
+    api_host: "{{ ansible_host }}"
+    node: "{{ proxmox_node }}"
+    vmid: 102
+    state: current
+  delegate_to: localhost
+  register: worker_check
+  failed_when: false
+
+- name: Display worker VM status
+  debug:
+    msg: "Worker VM (VMID 102) {{ 'exists' if worker_check.vmid is defined else 'does not exist' }}"
+
+- name: Create VM from template
+  community.general.proxmox_kvm:
+    api_user: "{{ ansible_ssh_user }}@pam"
+    api_password: "{{ ansible_ssh_pass }}"
+    api_host: "{{ ansible_host }}"
+    node: "{{ proxmox_node }}"
+    vmid: 102
+    name: worker
+    agent: 1
+    memory: 7168
+    cores: 2
+    cpu: host
+    ipconfig:
+      ipconfig0: "ip=192.168.1.201/24,gw=192.168.1.1"
+    scsihw: virtio-scsi-pci
+    scsi:
+      scsi0: "local:28,format=qcow2"
+    net:
+      net0: virtio,bridge=vmbr0
+    ide:
+      ide0: "local:iso/talos.iso,media=cdrom"
+      # ide2: "local:cloudinit"
+    state: present
+    tags:
+      - talos
+      - data-plane-node
+  delegate_to: localhost
+  when: worker_check.vmid is not defined

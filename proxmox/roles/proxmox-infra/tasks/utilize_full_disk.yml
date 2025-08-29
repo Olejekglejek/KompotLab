@@ -1,0 +1,97 @@
+- name: Show Disk Utilization Message
+  debug:
+    msg: |
+      On a fresh installation of Proxmox VE, only 100Gb of the entire disk space is utilized by default.
+      This playbook is to unlock and make the full disk space available for use.
+
+# Stat local-lvm
+- name: Stat /dev/pve/local-lvm
+  stat:
+    path: /dev/pve/local-lvm
+  register: local_lvm_stat
+
+# Remove local-lvm when present
+- name: Remove /dev/pve/local-lvm when present
+  command: "lvremove -f /dev/pve/local-lvm"
+  when: local_lvm_stat.stat.exists | default(false)
+  become: true
+
+# Remove local-lvm storage entry from /etc/pve/storage.cfg
+- name: Check if local-lvm storage entry exists
+  shell: "grep -q '^lvmthin: local-lvm' /etc/pve/storage.cfg"
+  register: local_lvm_cfg_present
+  ignore_errors: true
+  changed_when: false
+  become: true
+
+- name: Remove local-lvm storage entry from config
+  replace:
+    path: /etc/pve/storage.cfg
+    regexp: 'lvmthin: local-lvm\n([\s\S]*?)(?=^\S|\Z)'
+    replace: ''
+    backup: yes
+  when: local_lvm_cfg_present.rc == 0
+  become: true
+
+- name: Stat /dev/pve/data
+  stat:
+    path: /dev/pve/data
+  register: data_lv_stat
+
+- name: Remove /dev/pve/data when present
+  command: "lvremove -f /dev/pve/data"
+  when: data_lv_stat.stat.exists | default(false)
+  become: true
+
+# Check if there's free space in the volume group
+- name: Get volume group free space
+  command: "vgs --noheadings --units g -o vg_free pve"
+  register: vg_free_info
+  changed_when: false
+  become: true
+
+- name: Get root LV current size
+  command: "lvs --noheadings --units g -o lv_size /dev/pve/root"
+  register: root_lv_info
+  changed_when: false
+  become: true
+
+- name: Parse volume group free space
+  set_fact:
+    vg_free_space: "{{ vg_free_info.stdout | trim | regex_replace('g$', '') | float }}"
+
+- name: Expand /dev/pve/root to use all free space (if free space available)
+  command: "lvresize -l +100%FREE /dev/pve/root"
+  register: lvresize_result
+  when: vg_free_space | float > 0.1
+  changed_when: lvresize_result.rc == 0
+  failed_when: lvresize_result.rc != 0
+  become: true
+
+- name: Resize root filesystem to fill LV (if LV was expanded)
+  command: "resize2fs /dev/mapper/pve-root"
+  register: resizefs_result
+  when: vg_free_space | float > 0.1
+  changed_when: resizefs_result.rc == 0
+  failed_when: resizefs_result.rc != 0
+  become: true
+
+- name: Show final disk usage
+  command: "df -h"
+  register: df_result
+  changed_when: false
+  become: true
+
+- name: Show LVM status
+  command: "lvs"
+  register: lvs_result
+  changed_when: false
+  become: true
+
+- name: Debug disk usage and LVM status
+  debug:
+    msg:
+      - "Disk usage after expansion:"
+      - "{{ df_result.stdout }}"
+      - "LVM status:"
+      - "{{ lvs_result.stdout }}"

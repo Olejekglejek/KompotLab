@@ -1,0 +1,18 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - adguard-namespace.yaml
+  - adguard-pv.yaml
+  - adguard-pvc.yaml
+  - adguard-config-pv.yaml
+  - adguard-config-pvc.yaml
+  - adguard-configmap.yaml
+  - adguard-deployment.yaml
+  - adguard-service.yaml
+    # Optional: Ingress for HTTP UI only (uncomment to enable)
+    # - adguard-ingress.yaml
+labels:
+  - includeSelectors: true
+    pairs:
+      app.kubernetes.io/name: adguard
+      app.kubernetes.io/part-of: adguard

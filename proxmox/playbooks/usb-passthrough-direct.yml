@@ -1,0 +1,121 @@
+---
+- name: Direct USB Passthrough for AI210 Mass Storage
+  hosts: proxmox-kube
+  gather_facts: false
+  vars:
+    talos_vms:
+      - vmid: 8201
+        name: "talos-master"
+      - vmid: 8202
+        name: "talos-worker"
+    usb_device: "/dev/disk/by-id/usb-AI_Mass_Storage-0:0"
+
+  tasks:
+    - name: Verify USB device exists and get info
+      shell: |
+        if [ -b "{{ usb_device }}" ]; then
+          echo "✅ USB Device Found: {{ usb_device }}"
+          size=$(lsblk -b -n -o SIZE "{{ usb_device }}" 2>/dev/null | head -1)
+          size_gb=$(echo "scale=1; $size / 1024 / 1024 / 1024" | bc 2>/dev/null)
+          echo "Size: ${size_gb}GB"
+
+          # Get USB vendor:product ID for passthrough
+          usb_info=$(lsusb | grep "23a9:ef18")
+          if [ ! -z "$usb_info" ]; then
+            echo "USB Info: $usb_info"
+            echo "Vendor:Product ID: 23a9:ef18"
+          fi
+        else
+          echo "❌ USB device {{ usb_device }} not found"
+          exit 1
+        fi
+      register: usb_verification
+
+    - name: Display USB device information
+      debug:
+        msg: |
+          {{ usb_verification.stdout }}
+
+    - name: Stop Talos VMs for USB configuration
+      shell: "qm stop {{ item.vmid }}"
+      loop: "{{ talos_vms }}"
+      ignore_errors: true
+
+    - name: Wait for VMs to stop
+      shell: "qm status {{ item.vmid }}"
+      loop: "{{ talos_vms }}"
+      register: stop_status
+      until: "'stopped' in stop_status.stdout"
+      retries: 6
+      delay: 5
+
+    - name: Unmount USB device if mounted
+      shell: "umount /mnt/data"
+      ignore_errors: true
+
+    - name: Configure USB passthrough using vendor:product ID
+      shell: |
+        echo "Configuring USB passthrough for VM {{ item.vmid }} ({{ item.name }})"
+        # Use vendor:product ID method (more reliable than bus:device)
+        qm set {{ item.vmid }} -usb0 host=23a9:ef18
+        echo "USB passthrough configured for VM {{ item.vmid }}"
+      loop: "{{ talos_vms }}"
+      register: usb_config_result
+
+    - name: Display configuration results
+      debug:
+        msg: |
+          USB Configuration Results:
+          {% for result in usb_config_result.results %}
+          VM {{ talos_vms[loop.index0].vmid }}: {{ result.stdout }}
+          {% endfor %}
+
+    - name: Start Talos VMs with USB passthrough
+      shell: "qm start {{ item.vmid }}"
+      loop: "{{ talos_vms }}"
+
+    - name: Wait for VMs to start
+      shell: "qm status {{ item.vmid }}"
+      loop: "{{ talos_vms }}"
+      register: start_status
+      until: "'running' in start_status.stdout"
+      retries: 15
+      delay: 10
+
+    - name: Verify VM startup
+      debug:
+        msg: |
+          VM Startup Status:
+          {% for result in start_status.results %}
+          VM {{ talos_vms[loop.index0].vmid }} ({{ talos_vms[loop.index0].name }}): {{ result.stdout }}
+          {% endfor %}
+
+    - name: Display final status
+      debug:
+        msg: |
+          🎉 USB Passthrough Configuration Complete!
+
+          📱 USB Device: AI210 Mass Storage (58.6GB)
+          📍 Device Path: {{ usb_device }}
+          🔧 Passthrough Method: vendor:product ID (23a9:ef18)
+
+          🖥️ VM Configuration:
+          {% for vm in talos_vms %}
+          - VM {{ vm.vmid }} ({{ vm.name }}): USB passthrough enabled
+          {% endfor %}
+
+          🚀 Next Steps:
+          1. Verify USB device visibility in Talos VMs:
+             talosctl ls /dev/sd* --endpoints 192.168.1.104,192.168.1.245
+
+          2. Run the Talos USB mounting playbook:
+             ansible-playbook -i inventory/inventory.yml playbooks/talos-usb-mount.yml
+
+          3. Update your applications to use the USB storage:
+             - FileBrowser should now see 58.6GB instead of 26.8GB
+             - Jellyfin media directory will be on USB storage
+             - AdGuard configs will persist on USB storage
+
+          💡 Verification Commands:
+          - Check from Talos: talosctl ls /dev --endpoints <node-ip>
+          - Check in pods: kubectl exec <pod-name> -- df -h /var/lib

@@ -1,0 +1,43 @@
+# Fix Locale Settings
+
+- name: Install locales package
+  apt:
+    name: locales
+    state: present
+    update_cache: yes
+
+- name: Generate en_GB.UTF-8 locale
+  locale_gen:
+    name: en_GB.UTF-8
+    state: present
+
+- name: Generate en_US.UTF-8 locale (fallback)
+  locale_gen:
+    name: en_US.UTF-8
+    state: present
+
+- name: Set system locale to en_GB.UTF-8
+  lineinfile:
+    path: /etc/default/locale
+    regexp: '^LANG='
+    line: 'LANG=en_GB.UTF-8'
+    create: yes
+
+- name: Set additional locale variables
+  lineinfile:
+    path: /etc/default/locale
+    regexp: '^{{ item.key }}='
+    line: '{{ item.key }}={{ item.value }}'
+    create: yes
+  loop:
+    - { key: 'LC_ALL', value: 'en_GB.UTF-8' }
+    - { key: 'LANGUAGE', value: 'en_GB:en' }
+    - { key: 'LC_CTYPE', value: 'en_GB.UTF-8' }
+
+- name: Update locale
+  command: update-locale LANG=en_GB.UTF-8 LC_ALL=en_GB.UTF-8
+  changed_when: false
+
+- name: Reconfigure locales
+  command: dpkg-reconfigure -f noninteractive locales
+  changed_when: false

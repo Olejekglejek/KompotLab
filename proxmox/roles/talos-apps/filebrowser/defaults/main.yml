@@ -1,0 +1,27 @@
+---
+# FileBrowser configuration defaults
+filebrowser_image: "hurlenko/filebrowser:latest"
+filebrowser_service_type: "LoadBalancer"
+filebrowser_service_port: 8080
+filebrowser_target_port: 8080  # hurlenko/filebrowser uses port 8080, not 80
+filebrowser_node_port: 31080
+
+# Storage configuration - using the entire USB stick mounted at /var/lib
+# This makes it easy to replace the USB stick in the future
+usb_storage_path: "/var/lib"  # Change this path when you replace the USB stick
+filebrowser_storage_path: "{{ usb_storage_path }}/filebrowser"
+
+# Pod Security Configuration
+filebrowser_pod_security_enforce: "privileged"
+filebrowser_pod_security_audit: "privileged"
+filebrowser_pod_security_warn: "privileged"
+
+# Default credentials (will be set automatically)
+filebrowser_admin_user: "{{ secrets.filebrowser_admin_user }}"
+filebrowser_admin_password: "{{ secrets.filebrowser_admin_password }}"
+
+# FileBrowser configuration
+filebrowser_port: 8080
+filebrowser_address: "0.0.0.0"
+filebrowser_database: "/database/filebrowser.db"
+filebrowser_root: "/srv"

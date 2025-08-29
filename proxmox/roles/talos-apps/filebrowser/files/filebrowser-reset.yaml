@@ -1,0 +1,131 @@
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: filebrowser-config
+  namespace: filebrowser
+data:
+  .filebrowser.json: |
+    {
+      "port": 80,
+      "baseURL": "",
+      "address": "",
+      "log": "stdout",
+      "database": "/database/filebrowser.db",
+      "root": "/srv"
+    }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: filebrowser
+  namespace: filebrowser
+  labels:
+    app: filebrowser
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: filebrowser
+  template:
+    metadata:
+      labels:
+        app: filebrowser
+    spec:
+      initContainers:
+      - name: setup-directories
+        image: alpine:latest
+        command: ['sh', '-c']
+        args:
+        - |
+          mkdir -p /var/lib/filebrowser/config
+          mkdir -p /var/lib/filebrowser/database
+          mkdir -p /var/lib/filebrowser/data
+          chown -R 1000:1000 /var/lib/filebrowser/
+          chmod -R 777 /var/lib/filebrowser/
+          # Reset the database to allow new user creation
+          rm -f /var/lib/filebrowser/database/filebrowser.db
+          echo "Database reset, directories created and permissions set"
+          ls -la /var/lib/filebrowser/
+        volumeMounts:
+        - name: usb-storage
+          mountPath: /var/lib
+        securityContext:
+          runAsUser: 0
+      - name: setup-credentials
+        image: hurlenko/filebrowser:latest
+        command: ['sh', '-c']
+        args:
+        - |
+          echo "Setting up FileBrowser with custom credentials..."
+          # Initialize new database
+          /filebrowser config init -d /database/filebrowser.db
+          # Create admin user with custom password
+          /filebrowser users add admin <password> -d /database/filebrowser.db --perm.admin
+          echo "Admin user created successfully"
+          chown -R 1000:1000 /database /config
+        volumeMounts:
+        - name: usb-storage
+          mountPath: /srv
+          subPath: filebrowser/data
+        - name: usb-storage
+          mountPath: /database
+          subPath: filebrowser/database
+        - name: usb-storage
+          mountPath: /config
+          subPath: filebrowser/config
+        - name: config
+          mountPath: /config/.filebrowser.json
+          subPath: .filebrowser.json
+        securityContext:
+          runAsUser: 0
+      containers:
+      - name: filebrowser
+        image: hurlenko/filebrowser:latest
+        command: ["/filebrowser"]
+        args: ["-c", "/config/.filebrowser.json"]
+        securityContext:
+          runAsUser: 0
+        ports:
+        - containerPort: 80
+          name: http
+        volumeMounts:
+        - name: usb-storage
+          mountPath: /srv
+          subPath: filebrowser/data
+        - name: usb-storage
+          mountPath: /database
+          subPath: filebrowser/database
+        - name: usb-storage
+          mountPath: /config
+          subPath: filebrowser/config
+        - name: config
+          mountPath: /config/.filebrowser.json
+          subPath: .filebrowser.json
+        resources:
+          limits:
+            cpu: "500m"
+            memory: "512Mi"
+          requests:
+            cpu: "100m"
+            memory: "128Mi"
+        livenessProbe:
+          httpGet:
+            path: /
+            port: http
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /
+            port: http
+          initialDelaySeconds: 5
+          periodSeconds: 5
+      volumes:
+      - name: usb-storage
+        hostPath:
+          path: /var/lib
+          type: Directory
+      - name: config
+        configMap:
+          name: filebrowser-config

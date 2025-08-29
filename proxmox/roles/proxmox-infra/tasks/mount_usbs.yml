@@ -1,0 +1,136 @@
+---
+# Mount all USB sticks to Proxmox
+
+- name: Install basic USB detection packages
+  apt:
+    name:
+      - usbutils
+      - util-linux
+    state: present
+    update_cache: true
+
+- name: Install filesystem support packages (ignore failures for unavailable packages)
+  apt:
+    name: "{{ item }}"
+    state: present
+  loop:
+    - ntfs-3g
+    - exfat-fuse
+    - exfatprogs
+    - dosfstools
+  ignore_errors: true
+  register: filesystem_packages
+
+- name: Show filesystem package installation results
+  debug:
+    msg: "Package {{ item.item }}: {{ 'SUCCESS' if not item.failed else 'FAILED - ' + item.msg }}"
+  loop: "{{ filesystem_packages.results }}"
+  when: filesystem_packages.results is defined
+
+- name: List all USB devices
+  shell: lsusb
+  register: usb_devices
+  changed_when: false
+
+- name: Show detected USB devices
+  debug:
+    msg: "{{ usb_devices.stdout_lines }}"
+
+- name: Copy USB management scripts to target
+  copy:
+    src: "{{ item }}"
+    dest: "/tmp/{{ item | basename }}"
+    mode: '0755'
+  loop:
+    - detect_usb_storage.sh
+    - get_usb_block_info.sh
+    - get_unmounted_usb_partitions.sh
+    - mount_usb_partition.sh
+    - show_mounted_usb_status.sh
+
+- name: Detect all USB storage devices
+  shell: /tmp/detect_usb_storage.sh
+  register: usb_storage_devices
+  changed_when: false
+
+- name: Show USB storage devices
+  debug:
+    msg: "{{ usb_storage_devices.stdout_lines }}"
+
+- name: Get detailed USB block device information
+  shell: /tmp/get_usb_block_info.sh
+  register: usb_block_info
+  changed_when: false
+  ignore_errors: true
+
+- name: Show detailed USB block device information
+  debug:
+    msg: "{{ usb_block_info.stdout_lines }}"
+  when: usb_block_info.stdout_lines is defined
+
+- name: Create mount directory for USB devices
+  file:
+    path: /mnt/usb
+    state: directory
+    mode: '0755'
+
+- name: Get list of unmounted USB partitions
+  shell: /tmp/get_unmounted_usb_partitions.sh
+  register: unmounted_usb_partitions
+  changed_when: false
+  ignore_errors: true
+
+- name: Show unmounted USB partitions
+  debug:
+    msg: "{{ unmounted_usb_partitions.stdout_lines }}"
+
+- name: Mount USB partitions
+  shell: /tmp/mount_usb_partition.sh "{{ item }}"
+  register: mount_result
+  loop: "{{ unmounted_usb_partitions.stdout_lines }}"
+  when:
+    - unmounted_usb_partitions.stdout_lines is defined
+    - item != ""
+    - item != "No unmounted USB partitions found"
+  ignore_errors: true
+
+- name: Show mount results
+  debug:
+    msg: "{{ mount_result.results | selectattr('stdout', 'defined') | map(attribute='stdout_lines') | list }}"
+  when: mount_result.results is defined
+
+- name: List all currently mounted USB devices
+  shell: /tmp/show_mounted_usb_status.sh
+  register: mounted_usb_status
+  changed_when: false
+
+- name: Show mounted USB device status
+  debug:
+    msg: "{{ mounted_usb_status.stdout_lines }}"
+
+- name: Create USB management script
+  copy:
+    src: usb-manager.sh
+    dest: /usr/local/bin/usb-manager.sh
+    mode: '0755'
+
+- name: Show USB management script information
+  debug:
+    msg:
+      - "USB management script created at /usr/local/bin/usb-manager.sh"
+      - "Usage examples:"
+      - "  usb-manager.sh list        # List all USB devices"
+      - "  usb-manager.sh mount-all   # Mount all USB storage devices"
+      - "  usb-manager.sh unmount-all # Unmount all USB devices"
+      - "  usb-manager.sh status      # Show mount status"
+
+- name: Clean up temporary scripts
+  file:
+    path: "/tmp/{{ item }}"
+    state: absent
+  loop:
+    - detect_usb_storage.sh
+    - get_usb_block_info.sh
+    - get_unmounted_usb_partitions.sh
+    - mount_usb_partition.sh
+    - show_mounted_usb_status.sh

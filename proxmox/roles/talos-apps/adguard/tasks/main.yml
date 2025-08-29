@@ -1,0 +1,30 @@
+---
+# AdGuard deployment tasks
+- name: Apply AdGuard Kubernetes manifests using Kustomize
+  command:
+    cmd: kubectl apply -k .
+    chdir: "{{ role_path }}"
+  register: adguard_deploy_result
+  changed_when: "'configured' in adguard_deploy_result.stdout or 'created' in adguard_deploy_result.stdout"
+
+- name: Display deployment result
+  debug:
+    msg: "{{ adguard_deploy_result.stdout_lines }}"
+  when: adguard_deploy_result.stdout_lines is defined
+
+- name: Wait for AdGuard deployment to be ready
+  command:
+    cmd: kubectl rollout status deployment/adguard -n adguard --timeout=300s
+  register: rollout_status
+  changed_when: false
+  failed_when: rollout_status.rc != 0
+
+- name: Verify AdGuard pods are running
+  command:
+    cmd: kubectl get pods -n adguard -l app.kubernetes.io/name=adguard
+  register: pod_status
+  changed_when: false
+
+- name: Display pod status
+  debug:
+    msg: "{{ pod_status.stdout_lines }}"

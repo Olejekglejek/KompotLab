@@ -1,0 +1,211 @@
+---
+- name: USB Passthrough Setup for Talos VMs (SSH-based)
+  hosts: proxmox-kube
+  gather_facts: false
+  vars:
+    talos_vms:
+      - vmid: 8201
+        name: "talos-master"
+      - vmid: 8202
+        name: "talos-worker"
+    # USB device identification (will be detected automatically)
+    usb_device_pattern: "60.*G"  # Look for 60GB USB device
+
+  tasks:
+    - name: Check if VMs exist
+      shell: "qm status {{ item.vmid }}"
+      loop: "{{ talos_vms }}"
+      register: vm_status
+      failed_when: false
+
+    - name: Display VM status
+      debug:
+        msg: |
+          VM Status:
+          {% for result in vm_status.results %}
+          VM {{ talos_vms[loop.index0].vmid }} ({{ talos_vms[loop.index0].name }}): {{ result.stdout if result.rc == 0 else 'Not found' }}
+          {% endfor %}
+
+    - name: Find USB storage devices
+      shell: |
+        lsusb -v 2>/dev/null | grep -A 10 -B 5 "Mass Storage\|{{ usb_device_pattern }}" ||
+        lsblk -o NAME,SIZE,VENDOR,MODEL | grep -i usb ||
+        fdisk -l 2>/dev/null | grep -A 2 -B 2 "{{ usb_device_pattern }}\|USB"
+      register: usb_discovery
+      failed_when: false
+
+    - name: Display USB devices found
+      debug:
+        msg: |
+          USB Storage Devices Found:
+          {{ usb_discovery.stdout }}
+
+    - name: Get detailed USB device information
+      shell: |
+        for device in /dev/disk/by-id/usb-*; do
+          if [ -e "$device" ]; then
+            echo "=== $device ==="
+            ls -la "$device"
+            if [ -b "$device" ]; then
+              lsblk "$device" 2>/dev/null || true
+              fdisk -l "$device" 2>/dev/null | head -10 || true
+            fi
+            echo ""
+          fi
+        done
+      register: detailed_usb_info
+      failed_when: false
+
+    - name: Show detailed USB information
+      debug:
+        msg: |
+          Detailed USB Device Information:
+          {{ detailed_usb_info.stdout }}
+
+    - name: Find the target USB device path
+      shell: |
+        # Look for USB devices with approximately 50-65GB (to catch 58.6GB device)
+        for device in /dev/disk/by-id/usb-*; do
+          if [ -b "$device" ] && [[ "$device" != *"-part"* ]]; then
+            # Skip partition devices, only look at main device
+            size=$(lsblk -b -n -o SIZE "$device" 2>/dev/null | head -1)
+            if [ ! -z "$size" ]; then
+              size_gb=$(echo "scale=1; $size / 1024 / 1024 / 1024" | bc 2>/dev/null || echo "0")
+              if (( $(echo "$size_gb > 45 && $size_gb < 70" | bc -l 2>/dev/null || echo "0") )); then
+                echo "FOUND_USB_DEVICE=$device"
+                echo "SIZE_GB=$size_gb"
+                # Get vendor and product info
+                vendor=$(lsblk -n -o VENDOR "$device" 2>/dev/null | head -1 | tr -d ' ')
+                model=$(lsblk -n -o MODEL "$device" 2>/dev/null | head -1 | tr -d ' ')
+                echo "VENDOR=$vendor"
+                echo "MODEL=$model"
+                break
+              fi
+            fi
+          fi
+        done
+      register: target_usb_device
+
+    - name: Display target USB device
+      debug:
+        msg: |
+          Target USB Device Discovery:
+          {{ target_usb_device.stdout }}
+
+    - name: Extract USB device information for passthrough
+      shell: |
+        device=$(echo "{{ target_usb_device.stdout }}" | grep "FOUND_USB_DEVICE=" | cut -d= -f2)
+        if [ ! -z "$device" ] && [ -b "$device" ]; then
+          # Get USB vendor and product ID from lsusb for passthrough
+          # Extract just the device name (sda from /dev/disk/by-id/usb-AI_Mass_Storage-0:0)
+          real_device=$(readlink -f "$device" | sed 's|/dev/||')
+
+          # Find the corresponding USB device using lsusb and sys info
+          usb_info=$(lsusb | grep -i "mass storage\|AI210")
+          if [ ! -z "$usb_info" ]; then
+            # Extract vendor:product ID (format: Bus 003 Device 002: ID 23a9:ef18)
+            vendor_product=$(echo "$usb_info" | awk '{print $6}')
+            echo "USB_VENDOR_PRODUCT=$vendor_product"
+
+            # Also get bus and device for alternative passthrough method
+            bus=$(echo "$usb_info" | awk '{print $2}')
+            dev=$(echo "$usb_info" | awk '{print $4}' | sed 's/://')
+            echo "USB_BUS_DEV=$bus:$dev"
+          else
+            echo "Could not find USB device in lsusb output"
+          fi
+        fi
+      register: usb_passthrough_info
+      when: target_usb_device.stdout != ""
+
+    - name: Show USB passthrough information
+      debug:
+        msg: |
+          USB Passthrough Info:
+          {{ usb_passthrough_info.stdout | default('No suitable USB device found') }}
+
+    - name: Stop Talos VMs for USB passthrough configuration
+      shell: "qm stop {{ item.vmid }}"
+      loop: "{{ talos_vms }}"
+      when: usb_passthrough_info.stdout is defined and usb_passthrough_info.stdout != ""
+      ignore_errors: true
+
+    - name: Wait for VMs to stop
+      shell: "qm status {{ item.vmid }}"
+      loop: "{{ talos_vms }}"
+      register: stop_status
+      until: "'stopped' in stop_status.stdout"
+      retries: 6
+      delay: 5
+      when: usb_passthrough_info.stdout is defined and usb_passthrough_info.stdout != ""
+
+    - name: Configure USB passthrough for Talos VMs
+      shell: |
+        {% set usb_info = usb_passthrough_info.stdout | default('') %}
+        {% if 'USB_VENDOR_PRODUCT=' in usb_info %}
+        {% set vendor_product = usb_info.split('USB_VENDOR_PRODUCT=')[1].split()[0] %}
+        echo "Configuring USB passthrough for VM {{ item.vmid }} with vendor:product {{ vendor_product }}"
+        qm set {{ item.vmid }} -usb0 host={{ vendor_product }}
+        {% elif 'USB_BUS_DEV=' in usb_info %}
+        {% set bus_dev = usb_info.split('USB_BUS_DEV=')[1].split()[0] %}
+        {% set bus = bus_dev.split(':')[0] %}
+        {% set dev = bus_dev.split(':')[1] %}
+        echo "Configuring USB passthrough for VM {{ item.vmid }} with bus {{ bus }} device {{ dev }}"
+        qm set {{ item.vmid }} -usb0 host={{ bus }}-{{ dev }}
+        {% else %}
+        echo "No USB passthrough configuration available for VM {{ item.vmid }}"
+        exit 1
+        {% endif %}
+      loop: "{{ talos_vms }}"
+      when: usb_passthrough_info.stdout is defined and usb_passthrough_info.stdout != ""
+      register: usb_config_result
+
+    - name: Start Talos VMs after USB configuration
+      shell: "qm start {{ item.vmid }}"
+      loop: "{{ talos_vms }}"
+      when: usb_passthrough_info.stdout is defined and usb_passthrough_info.stdout != ""
+
+    - name: Wait for VMs to start
+      shell: "qm status {{ item.vmid }}"
+      loop: "{{ talos_vms }}"
+      register: start_status
+      until: "'running' in start_status.stdout"
+      retries: 12
+      delay: 10
+      when: usb_passthrough_info.stdout is defined and usb_passthrough_info.stdout != ""
+
+    - name: Display final status
+      debug:
+        msg: |
+          ✅ USB Passthrough Configuration Complete!
+
+          {% if usb_passthrough_info.stdout is defined and usb_passthrough_info.stdout != "" %}
+          🔌 USB Device Passthrough Status:
+          - Target USB Device: {{ target_usb_device.stdout.split('FOUND_USB_DEVICE=')[1].split()[0] if 'FOUND_USB_DEVICE=' in target_usb_device.stdout else 'Not found' }}
+          - Device Size: {{ target_usb_device.stdout.split('SIZE_GB=')[1].split()[0] if 'SIZE_GB=' in target_usb_device.stdout else 'Unknown' }}GB
+          - Configuration: {{ usb_passthrough_info.stdout }}
+
+          📋 VM Status After Configuration:
+          {% for result in start_status.results %}
+          - VM {{ talos_vms[loop.index0].vmid }} ({{ talos_vms[loop.index0].name }}): {{ result.stdout }}
+          {% endfor %}
+
+          🚀 Next Steps:
+          1. SSH into your Talos nodes to verify USB device is visible
+          2. Run the talos-usb-mount.yml playbook to configure Talos mounting
+          3. Update your Kubernetes persistent volumes to use the USB storage
+
+          💡 Verification Commands:
+          - Check Talos nodes: talosctl ls /dev/sd* --endpoints <node-ip>
+          - Check USB in Kubernetes: kubectl exec <pod-name> -- ls -la /var/lib
+          {% else %}
+          ❌ No suitable USB device found for passthrough.
+
+          🔍 Available devices found:
+          {{ usb_discovery.stdout }}
+
+          💡 Please ensure:
+          1. The 60GB USB device is connected to the Proxmox host
+          2. The device is not mounted or in use
+          3. Check with: lsblk, fdisk -l, or lsusb on the Proxmox host
+          {% endif %}
