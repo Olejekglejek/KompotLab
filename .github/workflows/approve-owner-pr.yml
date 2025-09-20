@@ -1,0 +1,23 @@
+name: Approve owner PRs
+
+on:
+  workflow_dispatch:
+  # pull_request:
+  #   types: [opened, ready_for_review]
+
+permissions:
+  pull-requests: write
+
+jobs:
+  approve:
+    runs-on: ubuntu-latest
+    if: github.event.pull_request.user.login == 'Olejekglejek'
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Approve PR
+        run: gh pr review --approve ${{ github.event.pull_request.number }}
+        env:
+          GH_TOKEN: ${{ secrets.APPROVE_OWNER_PR }}

@@ -30,13 +30,14 @@
       ipconfig0: "ip=192.168.1.200/24,gw=192.168.1.1"
     scsihw: virtio-scsi-pci
     scsi:
-      scsi0: "local:34,format=qcow2"
+      scsi0: "local:100,format=qcow2"
     net:
       net0: virtio,bridge=vmbr0
     ide:
       ide0: "local:iso/talos.iso,media=cdrom"
       # ide2: "local:cloudinit"
     state: present
+    onboot: yes
     tags:
       - talos
       - control-plane
@@ -75,13 +76,14 @@
       ipconfig0: "ip=192.168.1.201/24,gw=192.168.1.1"
     scsihw: virtio-scsi-pci
     scsi:
-      scsi0: "local:28,format=qcow2"
+      scsi0: "local:400,format=qcow2"
     net:
       net0: virtio,bridge=vmbr0
     ide:
       ide0: "local:iso/talos.iso,media=cdrom"
       # ide2: "local:cloudinit"
     state: present
+    onboot: yes
     tags:
       - talos
       - data-plane-node
