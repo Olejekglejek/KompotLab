@@ -75,6 +75,10 @@ RUN curl -Lo bicep https://github.com/Azure/bicep/releases/latest/download/bicep
     chmod +x ./bicep && \
     mv ./bicep /usr/local/bin/bicep
 
+# Install talosctl
+RUN wget -q https://github.com/siderolabs/talos/releases/latest/download/talosctl-linux-amd64 -O /usr/local/bin/talosctl && \
+    chmod +x /usr/local/bin/talosctl
+
 # Copy project files
 COPY . /workspace/
 

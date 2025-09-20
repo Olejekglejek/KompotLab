@@ -1,3 +1,4 @@
+---
 - name: Delete Template VM
   community.general.proxmox_kvm:
     api_user: "{{ ansible_ssh_user }}@pam"
@@ -8,6 +9,16 @@
     state: absent
   delegate_to: localhost
 
+- name: Stop Control-Plane Node
+  community.general.proxmox_kvm:
+    api_user: "{{ ansible_ssh_user }}@pam"
+    api_password: "{{ ansible_ssh_pass }}"
+    api_host: "{{ ansible_host }}"
+    node: "{{ proxmox_node }}"
+    name: master
+    state: stopped
+  delegate_to: localhost
+
 - name: Delete Control-Plane Node
   community.general.proxmox_kvm:
     api_user: "{{ ansible_ssh_user }}@pam"
@@ -16,6 +27,16 @@
     node: "{{ proxmox_node }}"
     name: master
     state: absent
+  delegate_to: localhost
+
+- name: Stop Worker Node
+  community.general.proxmox_kvm:
+    api_user: "{{ ansible_ssh_user }}@pam"
+    api_password: "{{ ansible_ssh_pass }}"
+    api_host: "{{ ansible_host }}"
+    node: "{{ proxmox_node }}"
+    name: worker
+    state: stopped
   delegate_to: localhost
 
 - name: Delete Worker Node

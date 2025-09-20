@@ -10,8 +10,15 @@
     - name: Create Talos Nodes
       import_tasks: create-nodes.yml
 
-    - name: Config Talos Nodes
-      import_tasks: config-nodes.yml
+    - name: Fresh Install
+      import_tasks: fresh-install.yml
+
+    # - name: Generate Templates
+    #   import_tasks: generate-templates.yml
+
+    # - name: Setup USB Storage (optional)
+    #   import_tasks: setup-usb-storage.yml
+    #   when: enable_usb_storage | default(false)
   when: not delete | bool
 
 - name: Cleanup

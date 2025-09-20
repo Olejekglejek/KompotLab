@@ -1,0 +1,76 @@
+---
+- name: Check status of master VM (VMID 101)
+  community.general.proxmox_kvm:
+    api_user: "{{ ansible_ssh_user }}@pam"
+    api_password: "{{ ansible_ssh_pass }}"
+    api_host: "{{ ansible_host }}"
+    node: "{{ proxmox_node }}"
+    vmid: 101
+    state: current
+  delegate_to: localhost
+  register: master_status
+
+- name: Check status of worker VM (VMID 102)
+  community.general.proxmox_kvm:
+    api_user: "{{ ansible_ssh_user }}@pam"
+    api_password: "{{ ansible_ssh_pass }}"
+    api_host: "{{ ansible_host }}"
+    node: "{{ proxmox_node }}"
+    vmid: 102
+    state: current
+  delegate_to: localhost
+  register: worker_status
+
+- name: Start master VM if not running
+  community.general.proxmox_kvm:
+    api_user: "{{ ansible_ssh_user }}@pam"
+    api_password: "{{ ansible_ssh_pass }}"
+    api_host: "{{ ansible_host }}"
+    node: "{{ proxmox_node }}"
+    vmid: 101
+    state: started
+  delegate_to: localhost
+  when: master_status.status != 'running'
+
+- name: Start worker VM if not running
+  community.general.proxmox_kvm:
+    api_user: "{{ ansible_ssh_user }}@pam"
+    api_password: "{{ ansible_ssh_pass }}"
+    api_host: "{{ ansible_host }}"
+    node: "{{ proxmox_node }}"
+    vmid: 102
+    state: started
+  delegate_to: localhost
+  when: worker_status.status != 'running'
+
+- name: Get master VM IP via QEMU guest agent
+  command: "qm guest cmd 101 network-get-interfaces"
+  register: qm_network_output
+  changed_when: false
+
+- name: Get worker VM IP via QEMU guest agent
+  command: "qm guest cmd 102 network-get-interfaces"
+  register: qm_worker_network_output
+  changed_when: false
+
+- name: Parse JSON and extract control plane IP and worker IP
+  set_fact:
+    control_plane_ip: "{{ network_data | selectattr('name', 'equalto', 'eth0') | map(attribute='ip-addresses') | flatten | selectattr('ip-address-type', 'equalto', 'ipv4') | map(attribute='ip-address') | first }}"
+    data_plane_ip: "{{ worker_network_data | selectattr('name', 'equalto', 'eth0') | map(attribute='ip-addresses') | flatten | selectattr('ip-address-type', 'equalto', 'ipv4') | map(attribute='ip-address') | first }}"
+  vars:
+    network_data: "{{ qm_network_output.stdout | from_json }}"
+    worker_network_data: "{{ qm_worker_network_output.stdout | from_json }}"
+  when: qm_network_output.rc == 0 and qm_network_output.stdout != "" and qm_worker_network_output.rc == 0 and qm_worker_network_output.stdout != ""
+
+- name: Debug control plane IP
+  debug:
+    msg: "Control Plane IP: {{ control_plane_ip | default('Not found') }}"
+
+- name: Debug worker IP
+  debug:
+    msg: "Worker IP: {{ data_plane_ip | default('Not found') }}"
+
+- name: Generate Talos config
+  command: talosctl gen config talos-proxmox-cluster https://{{ control_plane_ip }}:6443 --output-dir {{ talos_out }} --install-image factory.talos.dev/installer/ce4c980550dd2ab1b17bbf2b08801c7eb59418eafe8f279833297925d67c7515:v1.10.6
+  delegate_to: localhost
+  when: control_plane_ip is defined

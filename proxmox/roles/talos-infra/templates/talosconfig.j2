@@ -1,0 +1,10 @@
+context: talos-proxmox-cluster
+contexts:
+    talos-proxmox-cluster:
+        endpoints:
+            - {{ secrets.talos_controlplane_ip }}
+        nodes:
+            - {{ secrets.talos_controlplane_ip }}
+        ca: {{ secrets.controlplane_ca_crt }}
+        crt: {{ secrets.kubeconfig_client_crt }}
+        key: {{ secrets.kubeconfig_client_key }}

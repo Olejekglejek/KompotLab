@@ -1,0 +1,32 @@
+- name: Generate templates block
+  block:
+    - name: Ensure output directory exists
+      file:
+        path: "{{ template_output_dir }}"
+        state: directory
+        mode: '0755'
+
+    - name: Debug template output directory
+      debug:
+        msg: "Template output directory is set to {{ template_output_dir }}"
+
+    - name: Generate controlplane template
+      template:
+        src: "controlplane.yaml.j2"
+        dest: "{{ template_output_dir }}/controlplane.yaml"
+
+    - name: Generate worker template
+      template:
+        src: "worker.yaml.j2"
+        dest: "{{ template_output_dir }}/worker.yaml"
+
+    - name: Generate talosconfig template
+      template:
+        src: "talosconfig.j2"
+        dest: "{{ template_output_dir }}/talosconfig.yaml"
+
+    - name: Generate kubeconfig template
+      template:
+        src: "kubeconfig.j2"
+        dest: "{{ template_output_dir }}/kubeconfig.yaml"
+  delegate_to: localhost
